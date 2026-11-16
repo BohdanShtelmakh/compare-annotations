@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 import numpy as np
 from PIL import Image, ImageDraw
+from scipy.optimize import linear_sum_assignment
 
 from .parser import Annotation, AnnotationObject
 
@@ -37,43 +38,66 @@ def compare(annotated: Annotation, ground_truth: Annotation) -> ComparisonResult
     annotated_masks = [_to_mask(obj, annotated.width, annotated.height) for obj in annotated.objects]
     truth_masks = [_to_mask(obj, ground_truth.width, ground_truth.height) for obj in ground_truth.objects]
     pairs: list[ObjectScore] = []
-    used_truth: set[int] = set()
+    matched_a: set[int] = set()
+    matched_g: set[int] = set()
+    types = {obj.type for obj in annotated.objects} | {obj.type for obj in ground_truth.objects}
 
-    for a_obj, a_mask in zip(annotated.objects, annotated_masks, strict=True):
-        candidates = []
-        for index, (g_obj, g_mask) in enumerate(zip(ground_truth.objects, truth_masks, strict=True)):
-            if index in used_truth or a_obj.type != g_obj.type:
+    for object_type in types:
+        a_indices = [i for i, obj in enumerate(annotated.objects) if obj.type == object_type]
+        g_indices = [i for i, obj in enumerate(ground_truth.objects) if obj.type == object_type]
+        if not a_indices or not g_indices:
+            continue
+        intersections = np.zeros((len(a_indices), len(g_indices)), dtype=int)
+        ious = np.zeros((len(a_indices), len(g_indices)))
+        geometry: dict[tuple[int, int], tuple[int, int]] = {}
+        for row, a_index in enumerate(a_indices):
+            for column, g_index in enumerate(g_indices):
+                if not _boxes_overlap(annotated.objects[a_index].bbox, ground_truth.objects[g_index].bbox):
+                    continue
+                a_mask, g_mask = annotated_masks[a_index], truth_masks[g_index]
+                intersection = int(np.logical_and(a_mask, g_mask).sum())
+                if intersection:
+                    union = int(np.logical_or(a_mask, g_mask).sum())
+                    intersections[row, column] = intersection
+                    ious[row, column] = intersection / union
+                    geometry[(row, column)] = (intersection, union)
+        rows, columns = linear_sum_assignment(-intersections)
+        for row, column in zip(rows, columns, strict=True):
+            if ious[row, column] == 0:
                 continue
-            intersection = int(np.logical_and(a_mask, g_mask).sum())
-            if intersection:
-                union = int(np.logical_or(a_mask, g_mask).sum())
-                candidates.append((intersection / union, index, intersection, union))
-        if candidates:
-            iou, index, intersection, union = max(candidates)
-            used_truth.add(index)
-            pairs.append(ObjectScore(a_obj.nm, ground_truth.objects[index].nm, a_obj.type,
-                                     intersection, union, iou))
-        else:
-            area = int(a_mask.sum())
-            pairs.append(ObjectScore(a_obj.nm, None, a_obj.type, 0, area, 0.0))
+            a_index, g_index = a_indices[row], g_indices[column]
+            intersection, union = geometry[(row, column)]
+            matched_a.add(a_index)
+            matched_g.add(g_index)
+            pairs.append(ObjectScore(annotated.objects[a_index].nm, ground_truth.objects[g_index].nm,
+                                     object_type, intersection, union, float(ious[row, column])))
 
+    for index, (obj, mask) in enumerate(zip(annotated.objects, annotated_masks, strict=True)):
+        if index not in matched_a:
+            pairs.append(ObjectScore(obj.nm, None, obj.type, 0, int(mask.sum()), 0.0))
     for index, (obj, mask) in enumerate(zip(ground_truth.objects, truth_masks, strict=True)):
-        if index not in used_truth:
-            area = int(mask.sum())
-            pairs.append(ObjectScore(None, obj.nm, obj.type, 0, area, 0.0))
+        if index not in matched_g:
+            pairs.append(ObjectScore(None, obj.nm, obj.type, 0, int(mask.sum()), 0.0))
 
     intersection = sum(item.intersection for item in pairs)
     union = sum(item.union for item in pairs)
     return ComparisonResult(tuple(pairs), intersection, union)
 
 
+def _boxes_overlap(first: tuple[float, float, float, float], second: tuple[float, float, float, float]) -> bool:
+    return not (first[2] < second[0] or second[2] < first[0] or first[3] < second[1] or second[3] < first[1])
+
+
 def _to_mask(obj: AnnotationObject, width: int, height: int) -> np.ndarray:
     if obj.mask_path is not None:
-        image = Image.open(obj.mask_path).convert("L")
+        image = Image.open(obj.mask_path)
         if image.size != (width, height):
             raise ValueError(f"mask {obj.mask_path} has incorrect dimensions")
-        return np.asarray(image) > 0
+        values = np.asarray(image)
+        return values != 0 if image.mode in {"1", "P"} else np.asarray(image.convert("L")) > 0
 
+    if obj.shape == "poly" and not obj.path:
+        raise ValueError(f"polygon object {obj.nm} has no polygon path or mask")
     image = Image.new("1", (width, height))
     draw = ImageDraw.Draw(image)
     if obj.path:

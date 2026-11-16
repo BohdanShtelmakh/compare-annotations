@@ -3,7 +3,6 @@ from pathlib import Path
 from src.annotation_comparator.comparison import compare
 from src.annotation_comparator.parser import load_annotation
 
-
 ROOT = Path(__file__).parent
 annotated = load_annotation(ROOT / "data/annotated/road.jpg.json")
 ground_truth = load_annotation(
@@ -13,8 +12,17 @@ ground_truth = load_annotation(
 result = compare(annotated, ground_truth)
 
 for item in result.objects:
-    print(f"{item.annotated_nm or '-'} vs {item.ground_truth_nm or '-'}: "
-          f"{item.object_type}, IoU={item.iou:.4f}")
+    if item.annotated_nm and item.ground_truth_nm:
+        status = "MATCHED"
+        names = f"{item.annotated_nm} vs {item.ground_truth_nm}"
+    elif item.annotated_nm:
+        status = "MISSED OBJECT"
+        names = f"{item.annotated_nm} vs -"
+    else:
+        status = "EXTRA ANNOTATION"
+        names = f"- vs {item.ground_truth_nm}"
+    print(f"{status}: {names}, {item.object_type}, "
+          f"IoU={item.iou:.4f}, intersection={item.intersection}, union={item.union}")
 print(f"Intersection: {result.intersection}")
 print(f"Union: {result.union}")
 print(f"Overall score: {result.score:.2f}%")

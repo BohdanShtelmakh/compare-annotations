@@ -1,7 +1,15 @@
 import json
 
+import numpy as np
+import pytest
+from PIL import Image
+
 from src.annotation_comparator.comparison import compare
-from src.annotation_comparator.parser import load_annotation
+from src.annotation_comparator.parser import (
+    Annotation,
+    AnnotationObject,
+    load_annotation,
+)
 
 
 def annotation(tmp_path, name, objects):
@@ -35,6 +43,47 @@ def test_missing_and_extra_objects_use_their_areas(tmp_path):
                                                   ("extra", "car", (10, 10, 15, 15))]))
     assert len(result.objects) == 2
     assert result.score == 50.0
+
+
+def test_matching_maximizes_intersection_not_iou(tmp_path):
+    def obj(nm, mask_name):
+        return AnnotationObject(nm, "car", "poly", (0, 0, 7, 0), mask_path=tmp_path / mask_name)
+
+    masks = {
+        "a1.png": [1, 0, 0, 0, 0, 0, 0, 0],
+        "a2.png": [1, 1, 1, 1, 0, 0, 0, 0],
+        "g1.png": [1, 1, 1, 1, 1, 1, 1, 1],
+        "g2.png": [1, 1, 1, 0, 0, 0, 0, 0],
+    }
+    for name, values in masks.items():
+        Image.fromarray(np.array([values], dtype=np.uint8), mode="P").save(tmp_path / name)
+    annotated = Annotation("a", 8, 1, (obj("a1", "a1.png"), obj("a2", "a2.png")))
+    truth = Annotation("g", 8, 1, (obj("g1", "g1.png"), obj("g2", "g2.png")))
+
+    result = compare(annotated, truth)
+
+    assert {(item.annotated_nm, item.ground_truth_nm) for item in result.objects} == {("a1", "g2"), ("a2", "g1")}
+    assert result.intersection == 5
+
+
+def test_palette_mask_uses_nonzero_indices(tmp_path):
+    path = tmp_path / "mask.png"
+    Image.fromarray(np.array([[0, 1]], dtype=np.uint8), mode="P").save(path)
+    obj = AnnotationObject("a", "car", "poly", (0, 0, 1, 0), mask_path=path)
+    annotation = Annotation("a", 2, 1, (obj,))
+
+    result = compare(annotation, annotation)
+
+    assert result.objects[0].intersection == 1
+    assert result.score == 100.0
+
+
+def test_polygon_without_path_or_mask_is_rejected(tmp_path):
+    obj = AnnotationObject("a", "car", "poly", (0, 0, 1, 1))
+    annotation = Annotation("a", 2, 2, (obj,))
+
+    with pytest.raises(ValueError, match="no polygon path or mask"):
+        compare(annotation, annotation)
 
 
 def test_different_types_do_not_match(tmp_path):

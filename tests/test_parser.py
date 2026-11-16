@@ -44,6 +44,11 @@ def test_missing_geometry_is_rejected(tmp_path):
         load_annotation(write_annotation(tmp_path, data))
 
 
+def test_missing_required_mask_is_rejected(tmp_path):
+    with pytest.raises(AnnotationError, match="missing mask"):
+        load_annotation(write_annotation(tmp_path, pages()), tmp_path / "masks")
+
+
 def test_invalid_bbox_is_rejected(tmp_path):
     data = pages()
     data[1]["objects"][0]["x2"] = 0

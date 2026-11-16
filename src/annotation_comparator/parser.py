@@ -99,6 +99,7 @@ def _normalize_object(raw: dict[str, Any], masks_dir: str | Path | None) -> Anno
     mask_path = None
     if masks_dir is not None:
         candidate = Path(masks_dir) / f"{raw['nm']}.png"
-        if candidate.exists():
-            mask_path = candidate
+        if not candidate.exists():
+            raise AnnotationError(f"missing mask for object {raw['nm']}: {candidate}")
+        mask_path = candidate
     return AnnotationObject(raw["nm"], raw.get("type"), raw.get("shape"), bbox, normalized_path, mask_path)
