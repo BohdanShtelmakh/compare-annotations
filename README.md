@@ -22,6 +22,18 @@ Install dependencies and run:
 
 `main.py` reads the sample files under `data/`, prints the comparison, and writes the full result to `output/results.json`. The `output/` directory is ignored by Git.
 
+Use custom inputs with:
+
+```bash
+.venv/bin/python main.py \\
+  --annotated path/to/annotated.json \\
+  --ground-truth path/to/ground_truth.json \\
+  --masks-dir path/to/masks \\
+  --output output/custom-results.json
+```
+
+All arguments default to the sample paths above.
+
 Run tests with:
 
 ```bash

@@ -37,6 +37,13 @@ def test_loads_and_normalizes_annotation(tmp_path):
     assert obj.mask_path == masks / "0.1.png"
 
 
+def test_unknown_geometry_id_is_rejected(tmp_path):
+    data = pages()
+    data[1]["objects"][0]["nm"] = "unknown"
+    with pytest.raises(AnnotationError, match="unknown object nm"):
+        load_annotation(write_annotation(tmp_path, data))
+
+
 def test_missing_geometry_is_rejected(tmp_path):
     data = pages()
     data[1]["objects"] = []

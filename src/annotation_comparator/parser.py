@@ -53,7 +53,9 @@ def load_annotation(json_path: str | Path, masks_dir: str | Path | None = None) 
         if nm in seen:
             raise AnnotationError(f"duplicate object nm in geometry: {nm}")
         seen.add(nm)
-        definition = objects_by_nm.get(nm, {})
+        if nm not in objects_by_nm:
+            raise AnnotationError(f"unknown object nm in geometry: {nm}")
+        definition = objects_by_nm[nm]
         result.append(_normalize_object({**definition, **raw}, masks_dir))
 
     missing = set(objects_by_nm) - seen

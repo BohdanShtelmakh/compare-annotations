@@ -2,7 +2,7 @@ import json
 
 import numpy as np
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from src.annotation_comparator.comparison import compare
 from src.annotation_comparator.parser import (
@@ -64,6 +64,41 @@ def test_matching_maximizes_intersection_not_iou(tmp_path):
 
     assert {(item.annotated_nm, item.ground_truth_nm) for item in result.objects} == {("a1", "g2"), ("a2", "g1")}
     assert result.intersection == 5
+
+
+def test_polygon_and_png_mask_compare_equal(tmp_path):
+    polygon = AnnotationObject("polygon", "car", "poly", (0, 0, 3, 3),
+                               path=((0, 0), (3, 0), (0, 3)))
+    mask_path = tmp_path / "triangle.png"
+    image = Image.new("1", (4, 4))
+    ImageDraw.Draw(image).polygon(((0, 0), (3, 0), (0, 3)), fill=1)
+    image.save(mask_path)
+    mask = AnnotationObject("mask", "car", "poly", (0, 0, 3, 3), mask_path=mask_path)
+
+    result = compare(Annotation("a", 4, 4, (polygon,)), Annotation("g", 4, 4, (mask,)))
+
+    assert result.score == 100.0
+
+
+def test_empty_annotations_score_perfectly(tmp_path):
+    empty = Annotation("empty", 4, 4, ())
+    result = compare(empty, empty)
+    assert result.score == 100.0
+    assert result.intersection == result.union == 0
+
+
+def test_no_overlap_scores_zero(tmp_path):
+    result = compare(annotation(tmp_path, "a", [("a", "car", (0, 0, 1, 1))]),
+                     annotation(tmp_path, "g", [("g", "car", (10, 10, 11, 11))]))
+    assert result.score == 0.0
+
+
+def test_score_is_area_weighted(tmp_path):
+    result = compare(annotation(tmp_path, "a", [("large", "car", (0, 0, 10, 10)),
+                                                  ("small", "car", (15, 15, 16, 16))]),
+                     annotation(tmp_path, "g", [("large-g", "car", (0, 0, 10, 10)),
+                                                  ("small-g", "car", (15, 15, 17, 17))]))
+    assert result.score == 125 / 130 * 100
 
 
 def test_palette_mask_uses_nonzero_indices(tmp_path):
